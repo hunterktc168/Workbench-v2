@@ -82,12 +82,47 @@ function formatGeminiContents(messages = []) {
 }
 
 /**
+ * Inspect an SSE data payload for provider error events or finish_reason: "error".
+ * Throws an Error with the provider message instead of silently ending the stream.
+ */
+function checkSSEChunkError(dataStr, currentEvent = '') {
+  let parsed = null;
+  try {
+    parsed = JSON.parse(dataStr);
+  } catch (e) {
+    if (currentEvent === 'error') {
+      throw new Error(`Stream error: ${dataStr || 'Unknown stream error'}`);
+    }
+    return;
+  }
+
+  if (parsed?.error) {
+    const msg = typeof parsed.error === 'string'
+      ? parsed.error
+      : (parsed.error.message || JSON.stringify(parsed.error));
+    throw new Error(`Stream error: ${msg}`);
+  }
+
+  if (parsed?.type === 'error' || currentEvent === 'error') {
+    const msg = parsed?.message || parsed?.error?.message || JSON.stringify(parsed);
+    throw new Error(`Stream error: ${msg}`);
+  }
+
+  const finishReason = parsed?.choices?.[0]?.finish_reason;
+  if (finishReason === 'error') {
+    const msg = parsed.choices?.[0]?.error?.message || parsed.message || 'Provider returned finish_reason: error';
+    throw new Error(`Stream error: ${msg}`);
+  }
+}
+
+/**
  * Helper to process SSE ReadableStream chunks line by line
  */
 async function* parseSSEStream(response, onDataChunk, signal) {
   const reader = response.body.getReader();
   const decoder = new TextDecoder('utf-8');
   let buffer = '';
+  let currentEvent = '';
 
   try {
     while (true) {
@@ -104,13 +139,23 @@ async function* parseSSEStream(response, onDataChunk, signal) {
 
       for (const line of lines) {
         const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith(':')) continue;
+        if (!trimmed) {
+          currentEvent = '';
+          continue;
+        }
+        if (trimmed.startsWith(':')) continue;
+
+        if (trimmed.startsWith('event:')) {
+          currentEvent = trimmed.slice(6).trim();
+          continue;
+        }
 
         if (trimmed.startsWith('data:')) {
           const dataStr = trimmed.slice(5).trim();
           if (dataStr === '[DONE]') {
             return;
           }
+          checkSSEChunkError(dataStr, currentEvent);
           const textChunk = onDataChunk(dataStr);
           if (textChunk) {
             yield textChunk;
@@ -123,6 +168,7 @@ async function* parseSSEStream(response, onDataChunk, signal) {
     if (buffer.trim().startsWith('data:')) {
       const dataStr = buffer.trim().slice(5).trim();
       if (dataStr && dataStr !== '[DONE]') {
+        checkSSEChunkError(dataStr, currentEvent);
         const textChunk = onDataChunk(dataStr);
         if (textChunk) yield textChunk;
       }
@@ -587,7 +633,7 @@ export class GeminiProvider {
     this.name = 'gemini';
     this.baseURL = (config.baseURL || 'https://generativelanguage.googleapis.com').replace(/\/+$/, '');
     this.apiKey = config.apiKey || '';
-    this.model = config.model || 'gemini-3.8-flash';
+    this.model = config.model || 'gemini-4-hydrogen';
     this.temperature = config.temperature !== undefined ? config.temperature : 0.7;
     this.maxTokens = config.maxTokens || 2048;
   }
@@ -636,7 +682,8 @@ export class GeminiProvider {
     const chunkExtractor = (dataStr) => {
       try {
         const parsed = JSON.parse(dataStr);
-        return parsed.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        const parts = parsed.candidates?.[0]?.content?.parts || [];
+        return parts.map(p => p.text || '').join('');
       } catch (err) {
         return '';
       }
@@ -691,7 +738,7 @@ export async function getProvider() {
   if (activeType === 'gemini') {
     const baseURL = await getSetting('gemini_base_url', 'https://generativelanguage.googleapis.com');
     const apiKey = await getSetting('gemini_api_key', await getSetting('llm_api_key', ''));
-    const model = await getSetting('gemini_model', 'gemini-3.8-flash');
+    const model = await getSetting('gemini_model', 'gemini-4-hydrogen');
     const temperature = parseFloat(await getSetting('llm_temperature', '0.7'));
     const maxTokens = parseInt(await getSetting('llm_max_tokens', '2048'), 10);
     return new GeminiProvider({ baseURL, apiKey, model, temperature, maxTokens });
@@ -756,7 +803,7 @@ export async function testConnection(providerInstance = null) {
       result = await provider.complete({
         system: 'Output exactly one word: OK',
         messages: [{ role: 'user', content: 'Ping' }],
-        maxTokens: 5,
+        maxTokens: 20,
         temperature: 0.1,
         signal: controller.signal
       });

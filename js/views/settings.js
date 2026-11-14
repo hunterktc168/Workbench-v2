@@ -9,6 +9,7 @@
 
 import { getSetting, setSetting, resetAllData, dbSelfTest } from '../db.js';
 import { testConnection, MockProvider, OpenAIProvider, AnthropicProvider, GeminiProvider } from '../llm.js';
+import { escapeHtml } from '../markdown.js';
 
 // Tracks the active document-level Escape listener so re-renders don't leak listeners.
 let escapeKeyHandler = null;
@@ -27,13 +28,11 @@ export async function render(container, params = {}) {
     `;
   }
 
-  // Load persisted settings (mock default).
-  // Prefer the active provider's own slot (what llm.js getProvider() actually uses),
-  // then fall back to the generic slot for legacy installs.
+  // Load persisted settings (mock default) scoped strictly to the active provider.
   const provider = await getSetting('llm_provider_type', 'mock');
-  const apiKey = (await getSetting(`${provider}_api_key`, '')) || (await getSetting('llm_api_key', ''));
-  const baseUrl = (await getSetting(`${provider}_base_url`, '')) || (await getSetting('llm_base_url', ''));
-  const model = (await getSetting(`${provider}_model`, '')) || (await getSetting('llm_model', ''));
+  const apiKey = await getSetting(`${provider}_api_key`, '');
+  const baseUrl = await getSetting(`${provider}_base_url`, '');
+  const model = await getSetting(`${provider}_model`, '');
   const temperature = parseFloat(await getSetting('llm_temperature', '0.7'));
   const maxTokens = parseInt(await getSetting('llm_max_tokens', '2048'), 10);
 
@@ -42,7 +41,7 @@ export async function render(container, params = {}) {
     mock: { url: 'Local In-Memory (No Network)', model: 'Deterministic Persona Generator' },
     openai: { url: 'https://api.openai.com/v1', model: 'gpt-4o' },
     anthropic: { url: 'https://api.anthropic.com', model: 'claude-3-7-sonnet-20250219' },
-    gemini: { url: 'https://generativelanguage.googleapis.com', model: 'gemini-3.8-flash' },
+    gemini: { url: 'https://generativelanguage.googleapis.com', model: 'gemini-4-hydrogen' },
   };
 
   const currentDefaults = defaultsByProvider[provider] || defaultsByProvider.mock;
@@ -132,7 +131,7 @@ export async function render(container, params = {}) {
                   type="password" 
                   id="api-key-input" 
                   class="input font-mono text-xs pr-20" 
-                  value="${apiKey}" 
+                  value="${escapeHtml(apiKey)}" 
                   placeholder="${provider === 'mock' ? 'No key required for Mock provider' : 'Paste API key here...'}" 
                   ${provider === 'mock' ? 'disabled' : ''} 
                 />
@@ -153,7 +152,7 @@ export async function render(container, params = {}) {
                 type="text" 
                 id="base-url-input" 
                 class="input font-mono text-xs" 
-                value="${baseUrl}" 
+                value="${escapeHtml(baseUrl)}" 
                 placeholder="${currentDefaults.url}" 
                 ${provider === 'mock' ? 'disabled' : ''} 
               />
@@ -170,7 +169,7 @@ export async function render(container, params = {}) {
                 type="text" 
                 id="model-input" 
                 class="input font-mono text-xs" 
-                value="${model}" 
+                value="${escapeHtml(model)}" 
                 placeholder="${currentDefaults.model}" 
                 ${provider === 'mock' ? 'disabled' : ''} 
               />
@@ -345,6 +344,7 @@ function wireSettingsEvents(container, defaultsByProvider) {
   const keyHint = document.getElementById('key-hint');
   const baseUrlHint = document.getElementById('base-url-hint');
   const modelHint = document.getElementById('model-hint');
+  let statusPillTimer = null;
 
   // Temperature slider listener
   if (tempSlider && tempDisplay) {
@@ -425,16 +425,16 @@ function wireSettingsEvents(container, defaultsByProvider) {
     // Also sync provider-specific slots for seamless backward-compatibility
     if (selectedProvider === 'openai') {
       await setSetting('openai_api_key', keyVal);
-      if (baseUrlVal) await setSetting('openai_base_url', baseUrlVal);
-      if (modelVal) await setSetting('openai_model', modelVal);
+      await setSetting('openai_base_url', baseUrlVal);
+      await setSetting('openai_model', modelVal);
     } else if (selectedProvider === 'anthropic') {
       await setSetting('anthropic_api_key', keyVal);
-      if (baseUrlVal) await setSetting('anthropic_base_url', baseUrlVal);
-      if (modelVal) await setSetting('anthropic_model', modelVal);
+      await setSetting('anthropic_base_url', baseUrlVal);
+      await setSetting('anthropic_model', modelVal);
     } else if (selectedProvider === 'gemini') {
       await setSetting('gemini_api_key', keyVal);
-      if (baseUrlVal) await setSetting('gemini_base_url', baseUrlVal);
-      if (modelVal) await setSetting('gemini_model', modelVal);
+      await setSetting('gemini_base_url', baseUrlVal);
+      await setSetting('gemini_model', modelVal);
     }
 
     showSaveFeedback();
@@ -443,6 +443,7 @@ function wireSettingsEvents(container, defaultsByProvider) {
   function showSaveFeedback() {
     const pill = document.getElementById('connection-status-pill');
     if (pill) {
+      if (statusPillTimer) clearTimeout(statusPillTimer);
       pill.innerHTML = `
         <span class="text-success inline-flex items-center gap-1 font-medium animate-fadeIn">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -451,8 +452,9 @@ function wireSettingsEvents(container, defaultsByProvider) {
           Settings saved to IndexedDB
         </span>
       `;
-      setTimeout(() => {
+      statusPillTimer = setTimeout(() => {
         pill.innerHTML = '';
+        statusPillTimer = null;
       }, 3500);
     }
   }
@@ -501,8 +503,12 @@ function wireSettingsEvents(container, defaultsByProvider) {
 
       const pill = document.getElementById('connection-status-pill');
       if (pill) {
+        if (statusPillTimer) clearTimeout(statusPillTimer);
         pill.innerHTML = `<span class="text-brass-light font-medium">✓ API keys wiped from browser storage.</span>`;
-        setTimeout(() => { pill.innerHTML = ''; }, 3000);
+        statusPillTimer = setTimeout(() => {
+          pill.innerHTML = '';
+          statusPillTimer = null;
+        }, 3000);
       }
     });
   }
@@ -513,6 +519,10 @@ function wireSettingsEvents(container, defaultsByProvider) {
     testConnBtn.addEventListener('click', async () => {
       const pill = document.getElementById('connection-status-pill');
       if (pill) {
+        if (statusPillTimer) {
+          clearTimeout(statusPillTimer);
+          statusPillTimer = null;
+        }
         pill.innerHTML = `<span class="text-slate-300 animate-pulse">Pinging 1-token test probe...</span>`;
       }
       testConnBtn.disabled = true;
@@ -539,8 +549,9 @@ function wireSettingsEvents(container, defaultsByProvider) {
         });
       } else if (selectedProvider === 'gemini') {
         providerInstance = new GeminiProvider({
+          baseURL: baseUrlVal || 'https://generativelanguage.googleapis.com',
           apiKey: keyVal,
-          model: modelVal || 'gemini-3.8-flash'
+          model: modelVal || 'gemini-4-hydrogen'
         });
       }
 
@@ -549,9 +560,9 @@ function wireSettingsEvents(container, defaultsByProvider) {
 
       if (pill) {
         if (res.ok) {
-          pill.innerHTML = `<span class="text-success font-medium">✓ ${res.message}</span>`;
+          pill.innerHTML = `<span class="text-success font-medium">✓ ${escapeHtml(res.message)}</span>`;
         } else {
-          pill.innerHTML = `<span class="text-danger font-medium">✗ ${res.message}</span>`;
+          pill.innerHTML = `<span class="text-danger font-medium">✗ ${escapeHtml(res.message)}</span>`;
         }
       }
     });
@@ -568,13 +579,13 @@ function wireSettingsEvents(container, defaultsByProvider) {
       const result = await dbSelfTest();
       if (result.ok) {
         diagnosticLog.innerHTML = `
-          <div class="text-success font-semibold mb-1">✓ IndexedDB Self-Test Passed (${result.durationMs}ms)</div>
-          <div class="text-slate-400 text-[11px]">${result.details}</div>
+          <div class="text-success font-semibold mb-1">✓ IndexedDB Self-Test Passed (${escapeHtml(String(result.durationMs))}ms)</div>
+          <div class="text-slate-400 text-[11px]">${escapeHtml(result.details)}</div>
         `;
       } else {
         diagnosticLog.innerHTML = `
-          <div class="text-danger font-semibold mb-1">✗ Self-Test Failed (${result.durationMs}ms)</div>
-          <div class="text-danger text-[11px]">${result.error}</div>
+          <div class="text-danger font-semibold mb-1">✗ Self-Test Failed (${escapeHtml(String(result.durationMs))}ms)</div>
+          <div class="text-danger text-[11px]">${escapeHtml(result.error)}</div>
         `;
       }
     });
@@ -611,7 +622,7 @@ function wireSettingsEvents(container, defaultsByProvider) {
         deleteModal.classList.add('hidden');
         await resetAllData();
         window.dispatchEvent(new CustomEvent('boardroom:sync'));
-        window.location.hash = '#/dashboard';
+        window.location.hash = '#/';
       } else {
         if (deleteErrorMsg) deleteErrorMsg.classList.remove('hidden');
       }

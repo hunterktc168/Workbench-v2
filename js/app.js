@@ -3,7 +3,7 @@
  * Pure Vanilla ES Module — Zero build step, zero frameworks
  */
 
-import { getAll, get, getSetting } from './db.js';
+import { get, getSetting } from './db.js';
 import { escapeHtml } from './markdown.js';
 import * as SettingsView from './views/settings.js';
 
@@ -103,6 +103,11 @@ async function navigate() {
   }
 
   // Mount view
+  const actionSlot = document.getElementById('topbar-action-slot');
+  if (actionSlot) {
+    actionSlot.innerHTML = '';
+  }
+
   const root = document.getElementById('view-root');
   if (root && route.render) {
     try {
@@ -120,8 +125,6 @@ async function navigate() {
 
   // Synchronize Chrome Elements
   updateTopBar(route.name, params);
-  await updateSidebar(route.name, params);
-  await updateRightRail(params.phase || 'ideation');
   closeMobileDrawer();
 }
 
@@ -137,37 +140,18 @@ function updateTopBar(routeName, params) {
   }
 
   if (phaseBadgeEl) {
-    const phaseKey = params.phase || (params.tab === 'boardroom' ? 'ideation' : null);
-    if (phaseKey) {
-      const p = PHASES.find(item => item.id === phaseKey);
-      if (p) {
-        phaseBadgeEl.textContent = `Phase 0${p.number}: ${p.label}`;
-        phaseBadgeEl.className = 'chip border-brass/40 text-brass-light bg-brass/10 text-xs py-0.5';
-      }
-    } else if (routeName === 'venture') {
-      const tabName = params.tab ? params.tab.toUpperCase() : 'WORKSPACE';
-      phaseBadgeEl.textContent = tabName;
-      phaseBadgeEl.className = 'chip border-brass/40 text-brass-light bg-brass/10 text-xs py-0.5';
-    } else if (routeName === 'root') {
-      phaseBadgeEl.textContent = 'Workbench';
-      phaseBadgeEl.className = 'chip text-slate-300 bg-panel text-xs py-0.5 border-subtle';
-    } else if (routeName === 'settings') {
+    if (routeName === 'settings') {
       phaseBadgeEl.textContent = 'Settings';
+      phaseBadgeEl.className = 'chip text-slate-300 bg-panel text-xs py-0.5 border-subtle';
+    } else if (routeName === 'root') {
+      phaseBadgeEl.textContent = 'Root';
+      phaseBadgeEl.className = 'chip text-slate-300 bg-panel text-xs py-0.5 border-subtle';
+    } else {
+      phaseBadgeEl.textContent = routeName ? routeName.charAt(0).toUpperCase() + routeName.slice(1) : '';
       phaseBadgeEl.className = 'chip text-slate-300 bg-panel text-xs py-0.5 border-subtle';
     }
   }
 }
-
-/**
- * Synchronize Sidebar Active Link & Phase Stepper highlights
- * Reflects real state: filled dot if messages exist, checkmark if deliverable exists
- */
-async function updateSidebar(routeName, params) {}
-
-/**
- * Synchronize Right Rail "Board at the table"
- */
-async function updateRightRail(currentPhaseId) {}
 
 /**
  * Mobile Drawer Controls
@@ -222,11 +206,10 @@ async function init() {
   // Hash change listener
   window.addEventListener('hashchange', navigate);
 
-  // Cross-view state synchronization listener (sidebar stepper, right rail)
-  window.addEventListener('boardroom:sync', async () => {
+  // Cross-view state synchronization listener
+  window.addEventListener('boardroom:sync', () => {
     const { route, params } = resolveRoute();
-    await updateSidebar(route.name, params);
-    await updateRightRail(params.phase || 'ideation');
+    updateTopBar(route.name, params);
   });
 
   // Initial navigation
