@@ -115,7 +115,7 @@ export function renderMarkdown(markdown = '') {
 
   // Bare URLs: https://... or http://... (protect URLs from bold/italic underscores)
   text = text.replace(/(https?:\/\/[^\s<>]+)/g, (match) => {
-    const cleanUrl = match.replace(/[.,;:!?)]+$/, '');
+    const cleanUrl = match.replace(/[.,;:!?]+$/, '');
     const trailing = match.slice(cleanUrl.length);
     const id = `@@LINK${links.length}@@`;
     links.push(

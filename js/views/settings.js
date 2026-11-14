@@ -33,6 +33,7 @@ export async function render(container, params = {}) {
   const apiKey = await getSetting(`${provider}_api_key`, '');
   const baseUrl = await getSetting(`${provider}_base_url`, '');
   const model = await getSetting(`${provider}_model`, '');
+  const tavilyApiKey = await getSetting('tavily_api_key', '');
   const temperature = parseFloat(await getSetting('llm_temperature', '0.7'));
   const maxTokens = parseInt(await getSetting('llm_max_tokens', '2048'), 10);
 
@@ -179,6 +180,28 @@ export async function render(container, params = {}) {
             </div>
           </div>
 
+          <!-- Tavily Search API Key (Scout Agent) -->
+          <div class="pt-4 border-t border-subtle">
+            <div class="flex items-center justify-between mb-1.5">
+              <label for="tavily-key-input" class="block text-xs font-medium text-slate-300">
+                Tavily API Key (Scout Web Search)
+              </label>
+              <button type="button" id="toggle-tavily-visibility-btn" class="text-[11px] text-brass-light hover:underline font-medium">
+                Show
+              </button>
+            </div>
+            <input 
+              type="password" 
+              id="tavily-key-input" 
+              class="input font-mono text-xs" 
+              value="${escapeHtml(tavilyApiKey)}" 
+              placeholder="tvly-..." 
+            />
+            <span class="text-[11px] text-faint mt-1 block">
+              Used by Scout to execute web searches via api.tavily.com. Stored locally in IndexedDB.
+            </span>
+          </div>
+
           <!-- Temperature & Max Tokens -->
           <div class="pt-4 border-t border-subtle grid grid-cols-1 sm:grid-cols-2 gap-6">
             <div>
@@ -282,7 +305,7 @@ export async function render(container, params = {}) {
       <div class="panel max-w-md w-full border-brass/40 p-6 space-y-4" onclick="event.stopPropagation()">
         <h3 class="font-serif text-xl text-slate-100">Forget Stored API Keys</h3>
         <p class="text-xs text-muted leading-relaxed">
-          Are you sure you want to erase all stored API keys for OpenAI, Anthropic, and Gemini from this browser's IndexedDB storage?
+          Are you sure you want to erase all stored API keys for OpenAI, Anthropic, Gemini, and Tavily from this browser's IndexedDB storage?
         </p>
         <div class="flex justify-end gap-2 pt-2">
           <button id="cancel-forget-key-btn" class="btn btn-ghost text-xs border border-subtle">Cancel</button>
@@ -406,19 +429,35 @@ function wireSettingsEvents(container, defaultsByProvider) {
     });
   }
 
+  // Toggle Tavily API key masking
+  const tavilyKeyInput = document.getElementById('tavily-key-input');
+  const toggleTavilyBtn = document.getElementById('toggle-tavily-visibility-btn');
+  if (toggleTavilyBtn && tavilyKeyInput) {
+    toggleTavilyBtn.addEventListener('click', () => {
+      if (tavilyKeyInput.type === 'password') {
+        tavilyKeyInput.type = 'text';
+        toggleTavilyBtn.textContent = 'Hide';
+      } else {
+        tavilyKeyInput.type = 'password';
+        toggleTavilyBtn.textContent = 'Show';
+      }
+    });
+  }
+
   // Save Settings Routine
   async function saveSettings() {
     const selectedProvider = providerSelect ? providerSelect.value : 'mock';
     const keyVal = apiKeyInput ? apiKeyInput.value.trim() : '';
     const baseUrlVal = baseUrlInput ? baseUrlInput.value.trim() : '';
     const modelVal = modelInput ? modelInput.value.trim() : '';
+    const tavilyKeyVal = tavilyKeyInput ? tavilyKeyInput.value.trim() : '';
     const tempVal = tempSlider ? tempSlider.value : '0.7';
     const maxTokensVal = document.getElementById('max-tokens-input')?.value || '2048';
 
     await setSetting('llm_provider_type', selectedProvider);
-    await setSetting('llm_api_key', keyVal);
     await setSetting('llm_base_url', baseUrlVal);
     await setSetting('llm_model', modelVal);
+    await setSetting('tavily_api_key', tavilyKeyVal);
     await setSetting('llm_temperature', tempVal);
     await setSetting('llm_max_tokens', maxTokensVal);
 
@@ -498,8 +537,10 @@ function wireSettingsEvents(container, defaultsByProvider) {
       await setSetting('openai_api_key', '');
       await setSetting('anthropic_api_key', '');
       await setSetting('gemini_api_key', '');
+      await setSetting('tavily_api_key', '');
 
       if (apiKeyInput) apiKeyInput.value = '';
+      if (tavilyKeyInput) tavilyKeyInput.value = '';
 
       const pill = document.getElementById('connection-status-pill');
       if (pill) {

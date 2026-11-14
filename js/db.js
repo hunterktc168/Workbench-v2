@@ -4,7 +4,7 @@
  */
 
 const DB_NAME = 'workbench_db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 let dbPromise = null;
 
@@ -51,6 +51,11 @@ export function getDB() {
       // Settings Store
       if (!db.objectStoreNames.contains('settings')) {
         db.createObjectStore('settings', { keyPath: 'key' });
+      }
+
+      // Dossier Store
+      if (!db.objectStoreNames.contains('dossier')) {
+        db.createObjectStore('dossier', { keyPath: 'id' });
       }
     };
 
@@ -270,7 +275,7 @@ export async function getVenture(id) {
 
 export async function saveVenture(venture) {
   if (!venture.id) {
-    venture.id = `v_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+    venture.id = `v_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
   }
   venture.updatedAt = Date.now();
   if (!venture.createdAt) {
@@ -311,7 +316,7 @@ export async function duplicateVenture(id) {
 
   const copy = {
     ...original,
-    id: `v_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+    id: `v_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`,
     name: `${original.name} (Copy)`,
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -340,7 +345,7 @@ export async function duplicateVenture(id) {
     if (d.ventureId === id) {
       const copyDeliverable = {
         ...d,
-        id: `deliv_${copy.id}_${d.phase}_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+        id: `deliv_${copy.id}_${d.phase}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         ventureId: copy.id,
         title: (d.title || 'Deliverable').replace(original.name, copy.name),
         createdAt: Date.now()
@@ -402,6 +407,21 @@ export async function getThreadSession(ventureId, phase, agentId = 'all') {
     };
   }
   return session;
+}
+
+/**
+ * Dossier Session Storage Helpers
+ */
+export async function saveDossierSession(session) {
+  return await put('dossier', session);
+}
+
+export async function getDossierSession(id) {
+  return await get('dossier', id);
+}
+
+export async function deleteDossierSession(id) {
+  return await deleteItem('dossier', id);
 }
 
 

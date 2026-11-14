@@ -6,6 +6,7 @@
 import { get, getSetting } from './db.js';
 import { escapeHtml } from './markdown.js';
 import * as SettingsView from './views/settings.js';
+import * as ScoutView from './views/scout.js';
 
 // Application State
 const state = {
@@ -26,6 +27,11 @@ const routes = [
     render: (root) => {
       root.innerHTML = '<div>Hello Workbench</div>';
     },
+  },
+  {
+    pattern: /^#\/scout\/?$/,
+    name: 'scout',
+    render: ScoutView.render,
   },
   {
     pattern: /^#\/settings\/?$/,
@@ -151,6 +157,13 @@ function updateTopBar(routeName, params) {
       phaseBadgeEl.className = 'chip text-slate-300 bg-panel text-xs py-0.5 border-subtle';
     }
   }
+
+  document.querySelectorAll('.sidebar-nav-link').forEach((link) => {
+    const isActive = link.dataset.route === routeName;
+    link.classList.toggle('bg-white/10', isActive);
+    link.classList.toggle('text-slate-100', isActive);
+    link.classList.toggle('text-slate-300', !isActive);
+  });
 }
 
 /**
@@ -180,15 +193,6 @@ function closeMobileDrawer() {
  * Bootstrap Application
  */
 async function init() {
-  // Venture switcher button in sidebar routes to dashboard
-  const ventureSwitcherBtn = document.getElementById('venture-switcher-btn');
-  if (ventureSwitcherBtn) {
-    ventureSwitcherBtn.addEventListener('click', () => {
-      window.location.hash = '#/';
-      closeMobileDrawer();
-    });
-  }
-
   // Mobile drawer events
   const menuBtn = document.getElementById('mobile-menu-btn');
   const closeBtn = document.getElementById('close-sidebar-btn');

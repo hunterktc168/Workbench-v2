@@ -719,7 +719,7 @@ export async function getProvider() {
 
   if (activeType === 'openai') {
     const baseURL = await getSetting('openai_base_url', 'https://api.openai.com/v1');
-    const apiKey = await getSetting('openai_api_key', await getSetting('llm_api_key', ''));
+    const apiKey = await getSetting('openai_api_key', '');
     const model = await getSetting('openai_model', 'gpt-4o');
     const temperature = parseFloat(await getSetting('llm_temperature', '0.7'));
     const maxTokens = parseInt(await getSetting('llm_max_tokens', '2048'), 10);
@@ -728,7 +728,7 @@ export async function getProvider() {
 
   if (activeType === 'anthropic') {
     const baseURL = await getSetting('anthropic_base_url', 'https://api.anthropic.com');
-    const apiKey = await getSetting('anthropic_api_key', await getSetting('llm_api_key', ''));
+    const apiKey = await getSetting('anthropic_api_key', '');
     const model = await getSetting('anthropic_model', 'claude-3-7-sonnet-20250219');
     const temperature = parseFloat(await getSetting('llm_temperature', '0.7'));
     const maxTokens = parseInt(await getSetting('llm_max_tokens', '2048'), 10);
@@ -737,7 +737,7 @@ export async function getProvider() {
 
   if (activeType === 'gemini') {
     const baseURL = await getSetting('gemini_base_url', 'https://generativelanguage.googleapis.com');
-    const apiKey = await getSetting('gemini_api_key', await getSetting('llm_api_key', ''));
+    const apiKey = await getSetting('gemini_api_key', '');
     const model = await getSetting('gemini_model', 'gemini-4-hydrogen');
     const temperature = parseFloat(await getSetting('llm_temperature', '0.7'));
     const maxTokens = parseInt(await getSetting('llm_max_tokens', '2048'), 10);
