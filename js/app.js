@@ -5,8 +5,9 @@
 
 import { get, getSetting } from './db.js';
 import { escapeHtml } from './markdown.js';
+import { AGENTS } from './agent-registry.js';
+import * as HubView from './views/hub.js';
 import * as SettingsView from './views/settings.js';
-import * as ScoutView from './views/scout.js';
 
 // Application State
 const state = {
@@ -19,20 +20,20 @@ const state = {
   currentParams: {},
 };
 
+const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 // Route Definitions
 const routes = [
   {
     pattern: /^#\/?$/,
     name: 'root',
-    render: (root) => {
-      root.innerHTML = '<div>Hello Workbench</div>';
-    },
+    render: HubView.render,
   },
-  {
-    pattern: /^#\/scout\/?$/,
-    name: 'scout',
-    render: ScoutView.render,
-  },
+  ...AGENTS.map((agent) => ({
+    pattern: new RegExp(`^${escapeRegExp(agent.route)}\\/?$`),
+    name: agent.id,
+    render: agent.viewModule.render,
+  })),
   {
     pattern: /^#\/settings\/?$/,
     name: 'settings',
@@ -193,6 +194,29 @@ function closeMobileDrawer() {
  * Bootstrap Application
  */
 async function init() {
+  // Populate sidebar navigation dynamically from AGENTS registry
+  const sidebarNav = document.querySelector('#sidebar nav');
+  if (sidebarNav) {
+    sidebarNav.innerHTML = '';
+    for (const agent of AGENTS) {
+      const link = document.createElement('a');
+      link.href = agent.route;
+      link.className = 'sidebar-nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium text-slate-300 hover:text-slate-100 hover:bg-white/5 transition-colors';
+      link.dataset.route = agent.id;
+      if (agent.description) {
+        link.title = agent.description;
+      }
+
+      const isSvgPath = typeof agent.icon === 'string' && /^[MmLlHhVvCcSsQqTtAaZz0-9\s,.-]+$/.test(agent.icon.trim());
+      const iconHtml = isSvgPath
+        ? `<svg class="w-4 h-4 text-muted shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${escapeHtml(agent.icon)}" /></svg>`
+        : `<span class="w-4 h-4 flex items-center justify-center text-sm shrink-0">${escapeHtml(agent.icon || '')}</span>`;
+
+      link.innerHTML = `${iconHtml}<span>${escapeHtml(agent.name)}</span>`;
+      sidebarNav.appendChild(link);
+    }
+  }
+
   // Mobile drawer events
   const menuBtn = document.getElementById('mobile-menu-btn');
   const closeBtn = document.getElementById('close-sidebar-btn');
