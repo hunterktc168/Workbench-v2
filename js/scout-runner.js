@@ -55,8 +55,11 @@ export async function runScout(query, onUpdate, signal) {
       emit(fullText, 'streaming');
     }
 
-    if (fullText.includes('[RESEARCH_COMPLETE]')) {
-      messages.push({ role: 'assistant', content: fullText });
+    if (/(?:^|\n)\[RESEARCH_COMPLETE\]\s*$/.test(fullText)) {
+      messages.push({
+        role: 'assistant',
+        content: fullText.replace(/\[RESEARCH_COMPLETE\]\s*$/, '').trim(),
+      });
       completed = true;
       break;
     }
@@ -64,7 +67,7 @@ export async function runScout(query, onUpdate, signal) {
     const toolCall = parseToolCall(fullText);
 
     if (toolCall.hasToolCall) {
-      messages.push({ role: 'assistant', content: fullText });
+      messages.push({ role: 'assistant', content: fullText, hideFromUser: true });
       emit(`Searching for: "${toolCall.query}"...`, 'tool_call');
 
       let response;
@@ -83,16 +86,18 @@ export async function runScout(query, onUpdate, signal) {
             }),
             signal,
           });
-          if (response.ok) break;
-          const errText = await response.text().catch(() => response.statusText);
-          lastErr = new Error(`Tavily API Error (${response.status}): ${errText || response.statusText}`);
-          // Retry only on 5xx / network-ish failures
-          if (response.status < 500 || attempt === NETWORK_RETRY_ATTEMPTS) throw lastErr;
         } catch (err) {
           if (err && err.name === 'AbortError') throw err;
           lastErr = err;
           if (attempt === NETWORK_RETRY_ATTEMPTS) throw lastErr;
+          continue;
         }
+
+        if (response.ok) break;
+        const errText = await response.text().catch(() => response.statusText);
+        lastErr = new Error(`Tavily API Error (${response.status}): ${errText || response.statusText}`);
+        // Retry only on 5xx / network-ish failures
+        if (response.status < 500 || attempt === NETWORK_RETRY_ATTEMPTS) throw lastErr;
       }
 
       if (!response || !response.ok) {
@@ -103,15 +108,17 @@ export async function runScout(query, onUpdate, signal) {
       messages.push({
         role: 'user',
         content: buildSearchContext(toolCall.query, searchResult),
+        hideFromUser: true,
       });
       continue;
     }
 
     // Neither a tool call nor [RESEARCH_COMPLETE] was produced
-    messages.push({ role: 'assistant', content: fullText });
+    messages.push({ role: 'assistant', content: fullText, hideFromUser: true });
     messages.push({
       role: 'user',
       content: 'You did not output a tool call and you did not output [RESEARCH_COMPLETE]. Please continue your research or finish the report.',
+      hideFromUser: true,
     });
   }
 
@@ -119,6 +126,7 @@ export async function runScout(query, onUpdate, signal) {
     messages.push({
       role: 'user',
       content: 'You have reached the maximum number of research iterations. Synthesize a final report immediately based on the information you have gathered so far, and end with [RESEARCH_COMPLETE].',
+      hideFromUser: true,
     });
 
     let finalReport = '';
@@ -136,7 +144,10 @@ export async function runScout(query, onUpdate, signal) {
         }
       }
     }
-    messages.push({ role: 'assistant', content: finalReport });
+    messages.push({
+      role: 'assistant',
+      content: finalReport.replace(/\[RESEARCH_COMPLETE\]\s*$/, '').trim(),
+    });
   }
 
   return messages;

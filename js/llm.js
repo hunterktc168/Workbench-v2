@@ -491,16 +491,17 @@ export class OpenAIProvider {
     return { ok: true, message: `Configured for ${this.model} via ${this.baseURL}.` };
   }
 
-  async *stream({ system, messages, temperature, maxTokens, signal }) {
+  async *stream({ system, messages, temperature, maxTokens, model, signal }) {
     const valid = this.validateConfig();
     if (!valid.ok) throw new Error(valid.message);
 
     const temp = temperature !== undefined ? temperature : this.temperature;
     const tokens = maxTokens || this.maxTokens;
+    const targetModel = (typeof model === 'string' && model.trim()) ? model.trim() : this.model;
     const url = `${this.baseURL}/chat/completions`;
 
     const bodyPayload = {
-      model: this.model,
+      model: targetModel,
       messages: formatOpenAIMessages(system, messages),
       stream: true,
       temperature: temp,
@@ -534,9 +535,9 @@ export class OpenAIProvider {
     yield* parseSSEStream(response, chunkExtractor, signal);
   }
 
-  async complete({ system, messages, temperature, maxTokens, signal }) {
+  async complete({ system, messages, temperature, maxTokens, model, signal }) {
     let full = '';
-    for await (const chunk of this.stream({ system, messages, temperature, maxTokens, signal })) {
+    for await (const chunk of this.stream({ system, messages, temperature, maxTokens, model, signal })) {
       full += chunk;
     }
     return full;
@@ -564,16 +565,17 @@ export class AnthropicProvider {
     return { ok: true, message: `Configured for ${this.model} via ${this.baseURL}.` };
   }
 
-  async *stream({ system, messages, temperature, maxTokens, signal }) {
+  async *stream({ system, messages, temperature, maxTokens, model, signal }) {
     const valid = this.validateConfig();
     if (!valid.ok) throw new Error(valid.message);
 
     const temp = temperature !== undefined ? temperature : this.temperature;
     const tokens = maxTokens || this.maxTokens;
+    const targetModel = (typeof model === 'string' && model.trim()) ? model.trim() : this.model;
     const url = `${this.baseURL}/v1/messages`;
 
     const bodyPayload = {
-      model: this.model,
+      model: targetModel,
       messages: formatAnthropicMessages(messages),
       max_tokens: tokens,
       temperature: temp,
@@ -616,9 +618,9 @@ export class AnthropicProvider {
     yield* parseSSEStream(response, chunkExtractor, signal);
   }
 
-  async complete({ system, messages, temperature, maxTokens, signal }) {
+  async complete({ system, messages, temperature, maxTokens, model, signal }) {
     let full = '';
-    for await (const chunk of this.stream({ system, messages, temperature, maxTokens, signal })) {
+    for await (const chunk of this.stream({ system, messages, temperature, maxTokens, model, signal })) {
       full += chunk;
     }
     return full;
@@ -645,13 +647,14 @@ export class GeminiProvider {
     return { ok: true, message: `Configured for ${this.model}.` };
   }
 
-  async *stream({ system, messages, temperature, maxTokens, signal }) {
+  async *stream({ system, messages, temperature, maxTokens, model, signal }) {
     const valid = this.validateConfig();
     if (!valid.ok) throw new Error(valid.message);
 
     const temp = temperature !== undefined ? temperature : this.temperature;
     const tokens = maxTokens || this.maxTokens;
-    const url = `${this.baseURL}/v1beta/models/${encodeURIComponent(this.model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(this.apiKey.trim())}`;
+    const targetModel = (typeof model === 'string' && model.trim()) ? model.trim() : this.model;
+    const url = `${this.baseURL}/v1beta/models/${encodeURIComponent(targetModel)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(this.apiKey.trim())}`;
 
     const bodyPayload = {
       contents: formatGeminiContents(messages),
@@ -692,9 +695,9 @@ export class GeminiProvider {
     yield* parseSSEStream(response, chunkExtractor, signal);
   }
 
-  async complete({ system, messages, temperature, maxTokens, signal }) {
+  async complete({ system, messages, temperature, maxTokens, model, signal }) {
     let full = '';
-    for await (const chunk of this.stream({ system, messages, temperature, maxTokens, signal })) {
+    for await (const chunk of this.stream({ system, messages, temperature, maxTokens, model, signal })) {
       full += chunk;
     }
     return full;
@@ -712,63 +715,74 @@ export const PROVIDERS = {
 };
 
 /**
- * Resolve the active provider from stored settings (Default: mock)
+ * Resolve a provider from stored settings with optional per-call overrides ({ provider, model, ... })
  */
-export async function getProvider() {
-  const activeType = await getSetting('llm_provider_type', 'mock');
+export async function getProvider(overrides = {}) {
+  const requestedType = typeof overrides?.provider === 'string' ? overrides.provider.trim() : '';
+  const activeType = (requestedType || (await getSetting('llm_provider_type', 'mock')) || 'mock').toLowerCase();
+  const modelOverride = (typeof overrides?.model === 'string' && overrides.model.trim()) ? overrides.model.trim() : '';
 
   if (activeType === 'openai') {
-    const baseURL = await getSetting('openai_base_url', 'https://api.openai.com/v1');
-    const apiKey = await getSetting('openai_api_key', '');
-    const model = await getSetting('openai_model', 'gpt-4o');
-    const temperature = parseFloat(await getSetting('llm_temperature', '0.7'));
-    const maxTokens = parseInt(await getSetting('llm_max_tokens', '2048'), 10);
+    const baseURL = overrides?.baseURL ?? await getSetting('openai_base_url', 'https://api.openai.com/v1');
+    const apiKey = overrides?.apiKey ?? await getSetting('openai_api_key', '');
+    const model = modelOverride || await getSetting('openai_model', 'gpt-4o');
+    const temperature = overrides?.temperature ?? parseFloat(await getSetting('llm_temperature', '0.7'));
+    const maxTokens = overrides?.maxTokens ?? parseInt(await getSetting('llm_max_tokens', '2048'), 10);
     return new OpenAIProvider({ baseURL, apiKey, model, temperature, maxTokens });
   }
 
   if (activeType === 'anthropic') {
-    const baseURL = await getSetting('anthropic_base_url', 'https://api.anthropic.com');
-    const apiKey = await getSetting('anthropic_api_key', '');
-    const model = await getSetting('anthropic_model', 'claude-3-7-sonnet-20250219');
-    const temperature = parseFloat(await getSetting('llm_temperature', '0.7'));
-    const maxTokens = parseInt(await getSetting('llm_max_tokens', '2048'), 10);
+    const baseURL = overrides?.baseURL ?? await getSetting('anthropic_base_url', 'https://api.anthropic.com');
+    const apiKey = overrides?.apiKey ?? await getSetting('anthropic_api_key', '');
+    const model = modelOverride || await getSetting('anthropic_model', 'claude-3-7-sonnet-20250219');
+    const temperature = overrides?.temperature ?? parseFloat(await getSetting('llm_temperature', '0.7'));
+    const maxTokens = overrides?.maxTokens ?? parseInt(await getSetting('llm_max_tokens', '2048'), 10);
     return new AnthropicProvider({ baseURL, apiKey, model, temperature, maxTokens });
   }
 
   if (activeType === 'gemini') {
-    const baseURL = await getSetting('gemini_base_url', 'https://generativelanguage.googleapis.com');
-    const apiKey = await getSetting('gemini_api_key', '');
-    const model = await getSetting('gemini_model', 'gemini-4-hydrogen');
-    const temperature = parseFloat(await getSetting('llm_temperature', '0.7'));
-    const maxTokens = parseInt(await getSetting('llm_max_tokens', '2048'), 10);
+    const baseURL = overrides?.baseURL ?? await getSetting('gemini_base_url', 'https://generativelanguage.googleapis.com');
+    const apiKey = overrides?.apiKey ?? await getSetting('gemini_api_key', '');
+    const model = modelOverride || await getSetting('gemini_model', 'gemini-4-hydrogen');
+    const temperature = overrides?.temperature ?? parseFloat(await getSetting('llm_temperature', '0.7'));
+    const maxTokens = overrides?.maxTokens ?? parseInt(await getSetting('llm_max_tokens', '2048'), 10);
     return new GeminiProvider({ baseURL, apiKey, model, temperature, maxTokens });
   }
 
-  // Default: Mock Provider
-  return new MockProvider();
+  if (activeType === 'mock' || !requestedType) {
+    return new MockProvider();
+  }
+
+  throw new Error(`Unknown LLM provider: ${requestedType}`);
 }
 
 /**
- * Universal Stream caller: resolves active provider and streams chunks
+ * Universal Stream caller: resolves active or overridden provider/model and streams chunks
  */
 export async function* stream(options = {}) {
-  const provider = await getProvider();
-  yield* provider.stream(options);
+  const { provider: providerOverride, model, ...rest } = options;
+  const provider = (providerOverride && typeof providerOverride.stream === 'function')
+    ? providerOverride
+    : await getProvider({ provider: providerOverride, model });
+  yield* provider.stream({ ...rest, model });
 }
 
 /**
- * Universal Complete caller: resolves active provider and resolves full text
+ * Universal Complete caller: resolves active or overridden provider/model and resolves full text
  */
 export async function complete(options = {}) {
-  const provider = await getProvider();
-  return await provider.complete(options);
+  const { provider: providerOverride, model, ...rest } = options;
+  const provider = (providerOverride && typeof providerOverride.complete === 'function')
+    ? providerOverride
+    : await getProvider({ provider: providerOverride, model });
+  return await provider.complete({ ...rest, model });
 }
 
 /**
- * Validate configuration of the active provider
+ * Validate configuration of the active or overridden provider
  */
-export async function validateConfig() {
-  const provider = await getProvider();
+export async function validateConfig(overrides = {}) {
+  const provider = await getProvider(overrides);
   return provider.validateConfig();
 }
 

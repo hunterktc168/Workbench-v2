@@ -6,6 +6,7 @@
  */
 
 import { runScout } from '../scout-runner.js';
+import { parseToolCall } from '../scout-core.js';
 import { stream } from '../llm.js';
 import { saveDossierSession, getDossierSession, deleteDossierSession } from '../db.js';
 import { escapeHtml, renderMarkdown } from '../markdown.js';
@@ -61,9 +62,40 @@ export async function render(container, params = {}) {
   };
   window.addEventListener('hashchange', hashChangeHandler);
 
-  const savedSession = await getDossierSession('scout_main');
+  let savedSession = await getDossierSession('scout');
+  if (!savedSession) {
+    const legacy = await getDossierSession('scout_main');
+    if (legacy) {
+      const migrated = { ...legacy, id: 'scout', updatedAt: Date.now() };
+      await saveDossierSession(migrated);
+      await deleteDossierSession('scout_main');
+      savedSession = migrated;
+    }
+  }
   const savedMessages = Array.isArray(savedSession?.messages) ? savedSession.messages : [];
-  const hasSavedMessages = savedMessages.length > 0;
+  let persistedMessages = [...savedMessages];
+  const isRealReport = (m) => {
+    if (!m || m.role !== 'assistant' || m.hideFromUser) return false;
+    const text = (m.content || '').replace(/\[RESEARCH_COMPLETE\]/g, '').trim();
+    if (text.length < 40) return false;
+    if (parseToolCall(text).hasToolCall) return false;
+    return true;
+  };
+  const isLegacyInternal = (msg) => {
+    if (!msg || typeof msg.content !== 'string') return false;
+    if (msg.role === 'user') {
+      return (
+        msg.content.startsWith('=== SEARCH RESULTS FOR:') ||
+        msg.content === 'You did not output a tool call and you did not output [RESEARCH_COMPLETE]. Please continue your research or finish the report.' ||
+        msg.content === 'You have reached the maximum number of research iterations. Synthesize a final report immediately based on the information you have gathered so far, and end with [RESEARCH_COMPLETE].'
+      );
+    }
+    if (msg.role === 'assistant') {
+      return !msg.content.includes('[RESEARCH_COMPLETE]') && parseToolCall(msg.content).hasToolCall;
+    }
+    return false;
+  };
+  const hasSavedMessages = savedMessages.some((m) => !m.hideFromUser && !isLegacyInternal(m));
   const emptyStateHtml = `
     <div class="text-xs text-muted text-center py-8">
       Enter a research topic below to dispatch Scout.
@@ -150,9 +182,7 @@ export async function render(container, params = {}) {
   const stepMeta = document.getElementById('scout-step-meta');
 
   let hasStarted = hasSavedMessages;
-  let hasGeneratedReport = savedMessages.some(
-    (m) => m.role === 'assistant' && (m.content || '').replace(/\[RESEARCH_COMPLETE\]/g, '').trim().length > 0
-  );
+  let hasGeneratedReport = savedMessages.some(isRealReport);
 
   const scrollToBottom = () => {
     if (feed) {
@@ -162,11 +192,15 @@ export async function render(container, params = {}) {
 
   if (hasSavedMessages && feed) {
     for (const msg of savedMessages) {
+      if (msg.hideFromUser) continue;
+      if (isLegacyInternal(msg)) continue;
       if (msg.role === 'user') {
         feed.appendChild(createMessageBubble('user', escapeHtml(msg.content || '')));
       } else if (msg.role === 'assistant') {
         const cleanText = (msg.content || '').replace(/\[RESEARCH_COMPLETE\]/g, '').trim();
-        feed.appendChild(createMessageBubble('assistant', renderMarkdown(cleanText)));
+        if (cleanText) {
+          feed.appendChild(createMessageBubble('assistant', renderMarkdown(cleanText)));
+        }
       }
     }
     scrollToBottom();
@@ -279,7 +313,8 @@ export async function render(container, params = {}) {
       if (finalText) {
         hasGeneratedReport = true;
       }
-      await saveDossierSession({ id: 'scout_main', messages: finalMessages, updatedAt: Date.now() });
+      persistedMessages.push(...finalMessages);
+      await saveDossierSession({ id: 'scout', messages: persistedMessages, updatedAt: Date.now() });
       scrollToBottom();
     } catch (err) {
       const bodyEl = currentThoughtBubble?.querySelector('.scout-bubble-body');
@@ -311,10 +346,17 @@ export async function render(container, params = {}) {
   async function handleSummarize() {
     if (activeController || !hasGeneratedReport || !feed) return;
 
-    const feedText = Array.from(feed.children)
-      .map((el) => (el.innerText || el.textContent || '').trim())
-      .filter(Boolean)
-      .join('\n\n---\n\n');
+    const session = await getDossierSession('scout');
+    const sessionMessages = Array.isArray(session?.messages) ? session.messages : [];
+    const parts = [];
+    for (const m of sessionMessages) {
+      if (m.hideFromUser) continue;
+      const text = (m.content || '').replace(/\[RESEARCH_COMPLETE\]/g, '').trim();
+      if (!text) continue;
+      if (m.role === 'assistant' && parseToolCall(text).hasToolCall) continue;
+      parts.push(text);
+    }
+    const feedText = parts.join('\n\n---\n\n');
 
     if (!feedText) return;
 
@@ -363,6 +405,13 @@ export async function render(container, params = {}) {
           bodyEl.innerHTML = renderMarkdown(`**Executive Summary**\n\n${summaryText.trim()}`);
         }
         scrollToBottom();
+      }
+      if (summaryText.trim()) {
+        persistedMessages.push({
+          role: 'assistant',
+          content: `**Executive Summary**\n\n${summaryText.trim()}`,
+        });
+        await saveDossierSession({ id: 'scout', messages: persistedMessages, updatedAt: Date.now() });
       }
     } catch (err) {
       const bodyEl = summaryBubble?.querySelector('.scout-bubble-body');
@@ -417,7 +466,8 @@ export async function render(container, params = {}) {
   if (clearBtn) {
     clearBtn.addEventListener('click', async () => {
       if (activeController) return;
-      await deleteDossierSession('scout_main');
+      await deleteDossierSession('scout');
+      persistedMessages = [];
       hasStarted = false;
       hasGeneratedReport = false;
       if (summarizeBtn) {
