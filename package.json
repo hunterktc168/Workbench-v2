@@ -1,7 +1,8 @@
 {
-  "name": "ai-studio-applet",
+  "name": "workbench-v2",
   "version": "0.1.0",
   "private": true,
+  "description": "Workbench — local-first AI Venture Operating System (vanilla SPA + AI Studio host)",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
