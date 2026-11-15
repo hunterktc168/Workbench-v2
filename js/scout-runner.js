@@ -7,8 +7,11 @@ import { stream } from './llm.js';
 import { getSetting } from './db.js';
 import { SCOUT_SYSTEM_PROMPT, parseToolCall, buildSearchContext } from './scout-core.js';
 
-const MAX_ITERATIONS = 5;
+// Hard ceiling on tool-use rounds. Raised from 5 -> 7 to give complex queries
+// a little more room while still preventing runaway loops.
+const MAX_ITERATIONS = 7;
 const TAVILY_SEARCH_URL = 'https://api.tavily.com/search';
+const NETWORK_RETRY_ATTEMPTS = 1; // one retry on transient network errors
 
 /**
  * Execute the autonomous Scout research loop.
@@ -64,22 +67,36 @@ export async function runScout(query, onUpdate, signal) {
       messages.push({ role: 'assistant', content: fullText });
       emit(`Searching for: "${toolCall.query}"...`, 'tool_call');
 
-      const response = await fetch(TAVILY_SEARCH_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          api_key: tavilyKey,
-          query: toolCall.query,
-          search_depth: 'basic',
-        }),
-        signal,
-      });
+      let response;
+      let lastErr;
+      for (let attempt = 0; attempt <= NETWORK_RETRY_ATTEMPTS; attempt++) {
+        try {
+          response = await fetch(TAVILY_SEARCH_URL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              api_key: tavilyKey,
+              query: toolCall.query,
+              search_depth: 'basic',
+            }),
+            signal,
+          });
+          if (response.ok) break;
+          const errText = await response.text().catch(() => response.statusText);
+          lastErr = new Error(`Tavily API Error (${response.status}): ${errText || response.statusText}`);
+          // Retry only on 5xx / network-ish failures
+          if (response.status < 500 || attempt === NETWORK_RETRY_ATTEMPTS) throw lastErr;
+        } catch (err) {
+          if (err && err.name === 'AbortError') throw err;
+          lastErr = err;
+          if (attempt === NETWORK_RETRY_ATTEMPTS) throw lastErr;
+        }
+      }
 
-      if (!response.ok) {
-        const errText = await response.text().catch(() => response.statusText);
-        throw new Error(`Tavily API Error (${response.status}): ${errText || response.statusText}`);
+      if (!response || !response.ok) {
+        throw lastErr || new Error('Tavily request failed after retries');
       }
 
       const searchResult = await response.json();
@@ -105,9 +122,19 @@ export async function runScout(query, onUpdate, signal) {
     });
 
     let finalReport = '';
-    for await (const chunk of stream({ system: SCOUT_SYSTEM_PROMPT, messages, signal })) {
-      finalReport += chunk;
-      emit(finalReport, 'streaming');
+    for (let attempt = 0; attempt <= NETWORK_RETRY_ATTEMPTS; attempt++) {
+      finalReport = '';
+      try {
+        for await (const chunk of stream({ system: SCOUT_SYSTEM_PROMPT, messages, signal })) {
+          finalReport += chunk;
+          emit(finalReport, 'streaming');
+        }
+        break;
+      } catch (err) {
+        if ((err && err.name === 'AbortError') || attempt === NETWORK_RETRY_ATTEMPTS) {
+          throw err;
+        }
+      }
     }
     messages.push({ role: 'assistant', content: finalReport });
   }

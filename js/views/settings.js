@@ -76,7 +76,7 @@ export async function render(container, params = {}) {
               Security Notice
             </h2>
             <p class="text-xs text-slate-300 leading-relaxed">
-              Keys are stored in this browser's IndexedDB in plaintext and sent directly from the browser; this is a local/demo tool — use a scoped key and rotate it.
+              API keys (LLM providers and Tavily) are stored in this browser’s IndexedDB in plaintext and are sent directly from the client. There is no server-side proxy. This design is intentional for a local / personal-demo tool. Use scoped keys with minimal privileges and rotate them regularly.
             </p>
           </div>
         </div>
