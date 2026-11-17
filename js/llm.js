@@ -113,6 +113,20 @@ function checkSSEChunkError(dataStr, currentEvent = '') {
     const msg = parsed.choices?.[0]?.error?.message || parsed.message || 'Provider returned finish_reason: error';
     throw new Error(`Stream error: ${msg}`);
   }
+
+  // Gemini: candidates[0].finishReason signals why generation stopped.
+  // STOP and FINISH_REASON_UNSPECIFIED are normal completions. Any other
+  // value (SAFETY, MAX_TOKENS, RECITATION, BLOCKLIST, PROHIBITED_CONTENT,
+  // SPII, OTHER) indicates the response was truncated or blocked; the manual
+  // mandates throwing on truncation rather than silently ending the stream.
+  const geminiFinish = parsed?.candidates?.[0]?.finishReason;
+  if (
+    typeof geminiFinish === 'string' &&
+    geminiFinish !== 'STOP' &&
+    geminiFinish !== 'FINISH_REASON_UNSPECIFIED'
+  ) {
+    throw new Error(`Gemini stream terminated: ${geminiFinish}`);
+  }
 }
 
 /**
@@ -536,8 +550,9 @@ export class OpenAIProvider {
   }
 
   async complete({ system, messages, temperature, maxTokens, model, signal }) {
+    const targetModel = (typeof model === 'string' && model.trim()) ? model.trim() : this.model;
     let full = '';
-    for await (const chunk of this.stream({ system, messages, temperature, maxTokens, model, signal })) {
+    for await (const chunk of this.stream({ system, messages, temperature, maxTokens, model: targetModel, signal })) {
       full += chunk;
     }
     return full;
@@ -619,8 +634,9 @@ export class AnthropicProvider {
   }
 
   async complete({ system, messages, temperature, maxTokens, model, signal }) {
+    const targetModel = (typeof model === 'string' && model.trim()) ? model.trim() : this.model;
     let full = '';
-    for await (const chunk of this.stream({ system, messages, temperature, maxTokens, model, signal })) {
+    for await (const chunk of this.stream({ system, messages, temperature, maxTokens, model: targetModel, signal })) {
       full += chunk;
     }
     return full;
@@ -696,8 +712,9 @@ export class GeminiProvider {
   }
 
   async complete({ system, messages, temperature, maxTokens, model, signal }) {
+    const targetModel = (typeof model === 'string' && model.trim()) ? model.trim() : this.model;
     let full = '';
-    for await (const chunk of this.stream({ system, messages, temperature, maxTokens, model, signal })) {
+    for await (const chunk of this.stream({ system, messages, temperature, maxTokens, model: targetModel, signal })) {
       full += chunk;
     }
     return full;
@@ -715,49 +732,46 @@ export const PROVIDERS = {
 };
 
 /**
- * Resolve a provider from stored settings with optional per-call overrides ({ provider, model, ... })
+ * Resolve the active provider from stored settings (Default: mock)
  */
 export async function getProvider(overrides = {}) {
   const requestedType = typeof overrides?.provider === 'string' ? overrides.provider.trim() : '';
   const activeType = (requestedType || (await getSetting('llm_provider_type', 'mock')) || 'mock').toLowerCase();
-  const modelOverride = (typeof overrides?.model === 'string' && overrides.model.trim()) ? overrides.model.trim() : '';
+  const modelOverride = typeof overrides?.model === 'string' && overrides.model.trim() ? overrides.model.trim() : '';
 
   if (activeType === 'openai') {
-    const baseURL = overrides?.baseURL ?? await getSetting('openai_base_url', 'https://api.openai.com/v1');
-    const apiKey = overrides?.apiKey ?? await getSetting('openai_api_key', '');
+    const baseURL = await getSetting('openai_base_url', 'https://api.openai.com/v1');
+    const apiKey = await getSetting('openai_api_key', '');
     const model = modelOverride || await getSetting('openai_model', 'gpt-4o');
-    const temperature = overrides?.temperature ?? parseFloat(await getSetting('llm_temperature', '0.7'));
-    const maxTokens = overrides?.maxTokens ?? parseInt(await getSetting('llm_max_tokens', '2048'), 10);
+    const temperature = parseFloat(await getSetting('llm_temperature', '0.7'));
+    const maxTokens = parseInt(await getSetting('llm_max_tokens', '2048'), 10);
     return new OpenAIProvider({ baseURL, apiKey, model, temperature, maxTokens });
   }
 
   if (activeType === 'anthropic') {
-    const baseURL = overrides?.baseURL ?? await getSetting('anthropic_base_url', 'https://api.anthropic.com');
-    const apiKey = overrides?.apiKey ?? await getSetting('anthropic_api_key', '');
+    const baseURL = await getSetting('anthropic_base_url', 'https://api.anthropic.com');
+    const apiKey = await getSetting('anthropic_api_key', '');
     const model = modelOverride || await getSetting('anthropic_model', 'claude-3-7-sonnet-20250219');
-    const temperature = overrides?.temperature ?? parseFloat(await getSetting('llm_temperature', '0.7'));
-    const maxTokens = overrides?.maxTokens ?? parseInt(await getSetting('llm_max_tokens', '2048'), 10);
+    const temperature = parseFloat(await getSetting('llm_temperature', '0.7'));
+    const maxTokens = parseInt(await getSetting('llm_max_tokens', '2048'), 10);
     return new AnthropicProvider({ baseURL, apiKey, model, temperature, maxTokens });
   }
 
   if (activeType === 'gemini') {
-    const baseURL = overrides?.baseURL ?? await getSetting('gemini_base_url', 'https://generativelanguage.googleapis.com');
-    const apiKey = overrides?.apiKey ?? await getSetting('gemini_api_key', '');
+    const baseURL = await getSetting('gemini_base_url', 'https://generativelanguage.googleapis.com');
+    const apiKey = await getSetting('gemini_api_key', '');
     const model = modelOverride || await getSetting('gemini_model', 'gemini-4-hydrogen');
-    const temperature = overrides?.temperature ?? parseFloat(await getSetting('llm_temperature', '0.7'));
-    const maxTokens = overrides?.maxTokens ?? parseInt(await getSetting('llm_max_tokens', '2048'), 10);
+    const temperature = parseFloat(await getSetting('llm_temperature', '0.7'));
+    const maxTokens = parseInt(await getSetting('llm_max_tokens', '2048'), 10);
     return new GeminiProvider({ baseURL, apiKey, model, temperature, maxTokens });
   }
 
-  if (activeType === 'mock' || !requestedType) {
-    return new MockProvider();
-  }
-
-  throw new Error(`Unknown LLM provider: ${requestedType}`);
+  // Default: Mock Provider
+  return new MockProvider();
 }
 
 /**
- * Universal Stream caller: resolves active or overridden provider/model and streams chunks
+ * Universal Stream caller: resolves active provider and streams chunks
  */
 export async function* stream(options = {}) {
   const { provider: providerOverride, model, ...rest } = options;
@@ -768,7 +782,7 @@ export async function* stream(options = {}) {
 }
 
 /**
- * Universal Complete caller: resolves active or overridden provider/model and resolves full text
+ * Universal Complete caller: resolves active provider and resolves full text
  */
 export async function complete(options = {}) {
   const { provider: providerOverride, model, ...rest } = options;
@@ -779,7 +793,7 @@ export async function complete(options = {}) {
 }
 
 /**
- * Validate configuration of the active or overridden provider
+ * Validate configuration of the active provider
  */
 export async function validateConfig(overrides = {}) {
   const provider = await getProvider(overrides);
