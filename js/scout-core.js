@@ -3,7 +3,7 @@
  * Pure Vanilla ES Module — Zero dependencies, zero UI
  */
 
-export const SCOUT_SYSTEM_PROMPT = `You are Scout, an autonomous research agent. Your job is to answer the user's query by searching the web and synthesizing findings.
+const BASE_PROMPT = `You are Scout, an autonomous research agent. Your job is to answer the user's query by searching the web and synthesizing findings.
 
 You have access to exactly one tool:
 - search_web: Executes a web search. Input: { "query": "string" }
@@ -21,6 +21,13 @@ INSTRUCTIONS:
 3. Wait for the tool result before continuing.
 4. Synthesize your findings into a comprehensive markdown report with inline citations [1], [2] corresponding to the sources provided.
 5. When you have the final answer and no more searches are needed, output exactly: [RESEARCH_COMPLETE] at the end of your response.`;
+
+export const SCOUT_PROMPTS = {
+  default: BASE_PROMPT,
+  gemini: BASE_PROMPT, // Currently the same, but allows future tuning
+  openai: BASE_PROMPT, // Currently the same, but allows future tuning
+  anthropic: BASE_PROMPT
+};
 
 /**
  * Validate a parsed object as a search_web tool call.

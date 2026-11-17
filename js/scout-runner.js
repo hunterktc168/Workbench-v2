@@ -5,7 +5,7 @@
 
 import { stream } from './llm.js';
 import { getSetting } from './db.js';
-import { SCOUT_SYSTEM_PROMPT, parseToolCall, buildSearchContext } from './scout-core.js';
+import { SCOUT_PROMPTS, parseToolCall, buildSearchContext } from './scout-core.js';
 
 // Hard ceiling on tool-use rounds. Raised from 5 -> 7 to give complex queries
 // a little more room while still preventing runaway loops.
@@ -27,6 +27,8 @@ export async function runScout(query, onUpdate, signal) {
   if (provider === 'mock') {
     throw new Error('Scout requires a real LLM provider. Please configure Gemini or OpenAI in Settings.');
   }
+
+  const systemPrompt = SCOUT_PROMPTS[provider] || SCOUT_PROMPTS.default;
 
   const rawKey = await getSetting('tavily_api_key', '');
   const tavilyKey = typeof rawKey === 'string' ? rawKey.trim() : String(rawKey || '').trim();
@@ -50,7 +52,7 @@ export async function runScout(query, onUpdate, signal) {
     iterations++;
 
     let fullText = '';
-    for await (const chunk of stream({ system: SCOUT_SYSTEM_PROMPT, messages, signal })) {
+    for await (const chunk of stream({ system: systemPrompt, messages, signal })) {
       fullText += chunk;
       emit(fullText, 'streaming');
     }
@@ -133,7 +135,7 @@ export async function runScout(query, onUpdate, signal) {
     for (let attempt = 0; attempt <= NETWORK_RETRY_ATTEMPTS; attempt++) {
       finalReport = '';
       try {
-        for await (const chunk of stream({ system: SCOUT_SYSTEM_PROMPT, messages, signal })) {
+        for await (const chunk of stream({ system: systemPrompt, messages, signal })) {
           finalReport += chunk;
           emit(finalReport, 'streaming');
         }
