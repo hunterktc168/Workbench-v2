@@ -3,7 +3,6 @@
  * Pure Vanilla ES Module — Zero build step, zero frameworks
  */
 
-import { get, getSetting } from './db.js';
 import { escapeHtml } from './markdown.js';
 import { AGENTS } from './agent-registry.js';
 import * as HubView from './views/hub.js';
@@ -95,19 +94,6 @@ async function navigate() {
 
   state.currentRoute = route.name;
   state.currentParams = params;
-
-  // Sync active venture details if ventureId is present
-  if (params.ventureId) {
-    const v = await get('ventures', params.ventureId);
-    if (v) {
-      state.currentVenture = { id: v.id, name: v.name, thesis: v.oneliner || v.thesis };
-    }
-  } else {
-    const storedName = await getSetting('active_venture_name');
-    const storedId = await getSetting('active_venture_id');
-    if (storedName) state.currentVenture.name = storedName;
-    if (storedId) state.currentVenture.id = storedId;
-  }
 
   // Mount view
   const actionSlot = document.getElementById('topbar-action-slot');

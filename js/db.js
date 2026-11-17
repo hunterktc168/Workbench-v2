@@ -93,21 +93,15 @@ export async function getAll(storeName) {
 }
 
 /**
- * Get records matching an index key (falls back to store scan if index is absent)
+ * Get records from a store by its 'ventureId' index.
+ * Both the sessions and deliverables stores always define this index.
  */
-async function getByIndex(storeName, indexName, key) {
+async function getByVentureId(storeName, ventureId) {
   const db = await getDB();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(storeName, 'readonly');
     const store = tx.objectStore(storeName);
-    if (!store.indexNames.contains(indexName)) {
-      const request = store.getAll();
-      request.onsuccess = () => resolve((request.result || []).filter((item) => item && item[indexName] === key));
-      request.onerror = () => reject(request.error);
-      return;
-    }
-    const index = store.index(indexName);
-    const request = index.getAll(key);
+    const request = store.index('ventureId').getAll(ventureId);
     request.onsuccess = () => resolve(request.result || []);
     request.onerror = () => reject(request.error);
   });
@@ -180,31 +174,6 @@ export async function clear(storeName) {
 }
 
 /**
- * Seed agents store if empty and defaultAgents are provided
- */
-export async function seedAgentsIfEmpty(defaultAgents = []) {
-  if (!Array.isArray(defaultAgents) || defaultAgents.length === 0) {
-    return false;
-  }
-  const existing = await getAll('agents');
-  if (existing.length > 0) {
-    return false;
-  }
-  const db = await getDB();
-  const tx = db.transaction('agents', 'readwrite');
-  const store = tx.objectStore('agents');
-  for (const agent of defaultAgents) {
-    const { systemPromptTemplate, ...serializableAgent } = agent;
-    store.put(serializableAgent);
-  }
-  return new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error || new Error('Transaction aborted'));
-  });
-}
-
-/**
  * Get setting value with default fallback
  */
 export async function getSetting(key, defaultValue = null) {
@@ -239,33 +208,12 @@ export async function getAllSettings() {
 }
 
 /**
- * Reset agents store back to defaults
+ * Danger zone: Clear all data in the database
  */
-export async function resetAgentsToDefault(defaultAgents) {
-  await clear('agents');
-  const db = await getDB();
-  const tx = db.transaction('agents', 'readwrite');
-  const store = tx.objectStore('agents');
-  for (const agent of defaultAgents) {
-    const { systemPromptTemplate, ...serializableAgent } = agent;
-    store.put(serializableAgent);
-  }
-  return new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve(true);
-    tx.onerror = () => reject(tx.error);
-  });
-}
-
-/**
- * Danger zone: Reset all data in the database
- */
-export async function resetAllData(defaultAgents = []) {
+export async function resetAllData() {
   const stores = ['ventures', 'sessions', 'deliverables', 'settings', 'agents', 'dossier'];
   for (const s of stores) {
     await clear(s);
-  }
-  if (defaultAgents && defaultAgents.length > 0) {
-    await seedAgentsIfEmpty(defaultAgents);
   }
   return true;
 }
@@ -336,13 +284,13 @@ export async function deleteVenture(id) {
   await deleteItem('ventures', id);
 
   // Clean up associated sessions
-  const sessions = await getByIndex('sessions', 'ventureId', id);
+  const sessions = await getByVentureId('sessions', id);
   for (const s of sessions) {
     await deleteItem('sessions', s.id);
   }
 
   // Clean up associated deliverables
-  const deliverables = await getByIndex('deliverables', 'ventureId', id);
+  const deliverables = await getByVentureId('deliverables', id);
   for (const d of deliverables) {
     await deleteItem('deliverables', d.id);
   }
@@ -365,7 +313,7 @@ export async function duplicateVenture(id) {
   await put('ventures', copy);
 
   // Copy sessions with unique thread-scoped IDs
-  const sessions = await getByIndex('sessions', 'ventureId', id);
+  const sessions = await getByVentureId('sessions', id);
   for (const s of sessions) {
     const agentSuffix = s.agentId && s.agentId !== 'all' ? `_${s.agentId}` : (s.id.endsWith('_all') ? '_all' : '');
     const copySession = {
@@ -378,7 +326,7 @@ export async function duplicateVenture(id) {
   }
 
   // Copy deliverables
-  const deliverables = await getByIndex('deliverables', 'ventureId', id);
+  const deliverables = await getByVentureId('deliverables', id);
   for (const d of deliverables) {
     const copyDeliverable = {
       ...d,
@@ -398,13 +346,13 @@ export async function getVentureStats(ventureId) {
   let deliverableCount = 0;
 
   try {
-    const sessions = await getByIndex('sessions', 'ventureId', ventureId);
+    const sessions = await getByVentureId('sessions', ventureId);
     for (const s of sessions) {
       const msgs = s.messages || s.transcript || [];
       messageCount += msgs.length;
     }
 
-    const deliverables = await getByIndex('deliverables', 'ventureId', ventureId);
+    const deliverables = await getByVentureId('deliverables', ventureId);
     deliverableCount = deliverables.length;
   } catch (err) {
     console.warn('Failed to calculate venture stats:', err);

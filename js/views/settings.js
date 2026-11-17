@@ -13,6 +13,8 @@ import { escapeHtml } from '../markdown.js';
 
 // Tracks the active document-level Escape listener so re-renders don't leak listeners.
 let escapeKeyHandler = null;
+// Tracks the settings-scoped hashchange listener so it can be torn down on navigation.
+let hashChangeHandler = null;
 
 export async function render(container, params = {}) {
   // Update Topbar action slot
@@ -28,13 +30,34 @@ export async function render(container, params = {}) {
     `;
   }
 
+  // Tear down the previous settings-scoped listener cleanly on re-render.
+  if (hashChangeHandler) {
+    window.removeEventListener('hashchange', hashChangeHandler);
+    hashChangeHandler = null;
+  }
+
+  // Remove the Escape listener once we navigate away from #/settings.
+  hashChangeHandler = () => {
+    const currentHash = (window.location.hash || '').split('?')[0];
+    if (currentHash !== '#/settings' && currentHash !== '#/settings/') {
+      if (escapeKeyHandler) {
+        document.removeEventListener('keydown', escapeKeyHandler);
+        escapeKeyHandler = null;
+      }
+      window.removeEventListener('hashchange', hashChangeHandler);
+      hashChangeHandler = null;
+    }
+  };
+  window.addEventListener('hashchange', hashChangeHandler);
+
   // Load persisted settings (mock default) scoped strictly to the active provider.
   const provider = await getSetting('llm_provider_type', 'mock');
   const apiKey = await getSetting(`${provider}_api_key`, '');
   const baseUrl = await getSetting(`${provider}_base_url`, '');
   const model = await getSetting(`${provider}_model`, '');
   const tavilyApiKey = await getSetting('tavily_api_key', '');
-  const temperature = parseFloat(await getSetting('llm_temperature', '0.7'));
+  const parsedTemp = parseFloat(await getSetting('llm_temperature', '0.7'));
+  const temperature = isNaN(parsedTemp) ? 0.7 : parsedTemp;
   const maxTokens = parseInt(await getSetting('llm_max_tokens', '2048'), 10);
 
   // Default placeholders per provider
@@ -455,8 +478,6 @@ function wireSettingsEvents(container, defaultsByProvider) {
     const maxTokensVal = document.getElementById('max-tokens-input')?.value || '2048';
 
     await setSetting('llm_provider_type', selectedProvider);
-    await setSetting('llm_base_url', baseUrlVal);
-    await setSetting('llm_model', modelVal);
     await setSetting('tavily_api_key', tavilyKeyVal);
     await setSetting('llm_temperature', tempVal);
     await setSetting('llm_max_tokens', maxTokensVal);
@@ -533,7 +554,6 @@ function wireSettingsEvents(container, defaultsByProvider) {
 
     confirmForgetBtn?.addEventListener('click', async () => {
       forgetModal.classList.add('hidden');
-      await setSetting('llm_api_key', '');
       await setSetting('openai_api_key', '');
       await setSetting('anthropic_api_key', '');
       await setSetting('gemini_api_key', '');

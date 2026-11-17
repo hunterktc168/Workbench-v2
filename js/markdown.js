@@ -45,9 +45,9 @@ export function renderMarkdown(markdown = '') {
   });
 
   // 4. Process blockquotes, headings, horizontal rules, lists, and paragraphs
-  // Blockquotes: > quote line
-  text = text.replace(/^(?:&gt;|>)[ ]?([\s\S]*?)(?=\n\n|$)/gm, (match, content) => {
-    const cleanLines = content
+  // Blockquotes: contiguous lines starting with > are grouped into one block
+  text = text.replace(/^((?:&gt;|>)[^\n]*(?:\n(?:&gt;|>)[^\n]*)*)/gm, (match) => {
+    const cleanLines = match
       .split('\n')
       .map(line => line.replace(/^(?:&gt;|>)[ ]?/, ''))
       .join('<br />');
